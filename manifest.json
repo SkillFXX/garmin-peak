@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Garmin Peak",
+  "version": "1.0.0",
+  "description": "Garmin Connect AI Coach",
+  "permissions": [
+    "storage",
+    "alarms",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://connect.garmin.com/*",
+    "http://localhost:11434/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://connect.garmin.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "endpoints.js"
+      ],
+      "matches": [
+        "https://connect.garmin.com/*"
+      ]
+    }
+  ],
+  "action": {
+    "default_title": "Garmin AI Coach"
+  }
+}
