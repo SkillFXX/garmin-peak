@@ -1,6 +1,6 @@
 const CONFIG = {
   OLLAMA_BASE_URL: "http://localhost:11434",
-  OLLAMA_MODEL: "qwen3.5",
+  OLLAMA_MODEL: "qwen3.5:4b",
   GARMIN_BASE: "https://connect.garmin.com/gc-api",
 };
 
@@ -8,28 +8,81 @@ let apiEndpoints = null;
 let chatMessages = [
   {
     role: "system",
-    content:
-      "Tu es un coach Garmin personnel. Tu aides l'utilisateur à analyser ses activités Garmin. IMPORTANT: Tu as déjà accès à l'identifiant UUID de l'utilisateur et à tous les outils/API disponibles. Tu dois appeler directement les outils nécessaires avec les bons arguments, sans jamais demander l'UUID à l'utilisateur, tu l'as déjà. Utilise-le automatiquement pour les appels API.",
+    content: `You are a professional Garmin performance coach and data analyst.
+
+Your role is to help the user understand, analyze, and improve their sports performance using Garmin activity data.
+
+You operate in a strict tool-first workflow.
+
+-----------------------
+CONTEXT
+-----------------------
+Current date: ${new Date().toISOString().split("T")[0]}
+
+All tool outputs use:
+- Time → seconds
+- Distance → meters
+- Speed → meters/second
+
+You MUST convert all values into human-friendly units:
+- Time → hh:mm:ss
+- Distance → kilometers (km)
+- Speed → km/h
+- Pace (if relevant) → min/km
+
+Round values appropriately for readability.
+
+-----------------------
+CORE BEHAVIOR
+-----------------------
+
+1. TOOL-FIRST EXECUTION
+- If the user request requires data, you MUST call the appropriate tool immediately.
+- Do NOT ask follow-up questions.
+- Do NOT explain what you are about to do.
+- Do NOT produce any natural language before the tool call.
+
+2. TOOL USAGE
+- Always select the MOST relevant tool.
+- Provide complete and accurate arguments.
+- Never guess missing required parameters → infer intelligently from context if possible.
+
+3. POST-TOOL RESPONSE
+- Parse the tool response fully before answering.
+- NEVER describe the raw JSON structure.
+- Extract only meaningful insights.
+
+4. ANALYSIS EXPECTATIONS
+You must go beyond simple reporting. Always:
+- Highlight key metrics (duration, distance, pace, HR, etc.)
+- Identify patterns or anomalies
+- Provide actionable insights
+- Suggest improvements when relevant
+
+5. COMMUNICATION STYLE
+- Be concise, clear, and coach-like
+- Default to short answers unless the user explicitly asks for more detail
+- No emojis
+- No markdown formatting
+- No unnecessary explanations or filler
+- Be precise and data-driven
+
+6. EDGE CASES
+- If no relevant data is found → clearly say so and suggest next steps
+- If data is incomplete → explain limitations briefly and proceed with best effort
+
+-----------------------
+STRICT RULES
+-----------------------
+
+- NEVER hallucinate data
+- NEVER invent tool outputs
+- NEVER explain JSON schemas
+- NEVER skip unit conversion
+- NEVER answer without calling a tool if data is required
+`,
   },
 ];
-
-let userUuid = null;
-
-function injectScriptToGetUUID() {
-  const script = document.createElement("script");
-  script.textContent = `
-    window.postMessage({ type: 'GARMIN_AGENT_UUID', uuid: window?.VIEWER_USERPREFERENCES?.displayName || null }, '*');
-  `;
-  document.documentElement.appendChild(script);
-  script.remove();
-}
-
-window.addEventListener("message", (event) => {
-  if (event.source !== window || event.data.type !== "GARMIN_AGENT_UUID")
-    return;
-  userUuid = event.data.uuid;
-  console.log("Garmin Peak - UUID captured:", userUuid);
-});
 
 (async () => {
   try {
@@ -37,7 +90,6 @@ window.addEventListener("message", (event) => {
     const module = await import(src);
     apiEndpoints = module.api;
     console.log("Garmin Peak - Endpoints loaded:", apiEndpoints !== null);
-    injectScriptToGetUUID();
   } catch (err) {
     console.error("Garmin Peak - Failed to load endpoints:", err);
   }
@@ -146,7 +198,7 @@ function updateLoadingState(isLoading) {
       sendBtn.textContent = "...";
       sendBtn.classList.add("loading");
     } else {
-      sendBtn.textContent = "Envoyer";
+      sendBtn.textContent = "Send";
       sendBtn.classList.remove("loading");
     }
   }
@@ -176,7 +228,9 @@ async function sendToOllama() {
 
 async function handleToolCalls(toolCalls) {
   for (const toolCall of toolCalls) {
+    const { id: callId } = toolCall;
     const { name: funcName, arguments: rawArgs } = toolCall.function;
+
     console.log(`Garmin Peak - Tool call received: ${funcName}`, rawArgs);
 
     let args = {};
@@ -191,54 +245,55 @@ async function handleToolCalls(toolCalls) {
     if (!endpointConfig) {
       chatMessages.push({
         role: "tool",
-        content: JSON.stringify({
-          error: "Outil/Endpoint non trouvé dans endpoints.js",
-        }),
+        tool_call_id: callId,
         name: funcName,
+        content: JSON.stringify({ error: "Tool/Endpoint not found" }),
       });
       continue;
     }
 
-    let url = endpointConfig.url;
+    let finalUrl = endpointConfig.url;
+
     if (endpointConfig.params) {
-      for (const k of Object.keys(endpointConfig.params)) {
-        let val = args[k] || (k === "uuid" ? userUuid : null);
-        if (val) {
-          url = url.replace(`{${k}}`, encodeURIComponent(val));
+      for (const paramKey of Object.keys(endpointConfig.params)) {
+        if (args[paramKey] !== undefined) {
+          finalUrl = finalUrl.replace(`{${paramKey}}`, args[paramKey]);
         }
       }
     }
 
-    const urlObj = new URL(url);
+    const urlObj = new URL(finalUrl);
     if (endpointConfig.query) {
-      for (const k of Object.keys(endpointConfig.query)) {
-        let val = args[k];
-        if (val !== undefined && val !== null) {
-          urlObj.searchParams.append(k, val);
+      for (const queryKey of Object.keys(endpointConfig.query)) {
+        const val = args[queryKey];
+        if (
+          val !== undefined &&
+          val !== null &&
+          !endpointConfig.url.includes(`{${queryKey}}`)
+        ) {
+          urlObj.searchParams.append(queryKey, val);
         }
       }
     }
 
-    displayMessage("assistant", `Récupération en cours: ${funcName}...`);
-    console.log(`Garmin Peak - Fetching ${urlObj.toString()}`);
+    displayMessage("assistant", `Data Recovery : ${funcName}...`);
+    const targetUrl = urlObj.toString();
+    console.log(`Garmin Peak - Fetching: ${targetUrl}`);
 
-    const data = await garminFetch(urlObj.toString());
+    const data = await garminFetch(targetUrl);
 
-    if (data) {
-      console.log(
-        `Garmin Peak - Data fetched for ${funcName} (${JSON.stringify(data).length} bytes)`,
-      );
-    } else {
-      console.log(`Garmin Peak - Failed to fetch data for ${funcName}`);
-    }
+    const toolResponse = data
+      ? JSON.stringify(data)
+      : JSON.stringify({ error: "No data or empty response" });
 
     chatMessages.push({
       role: "tool",
-      content: JSON.stringify(
-        data || { error: "Failed to fetch data or empty response" },
-      ),
+      tool_call_id: callId,
       name: funcName,
+      content: toolResponse,
     });
+
+    console.log(`Garmin Peak - Tool ${funcName} processed.`);
   }
 }
 
@@ -262,7 +317,7 @@ async function onSendMessage(text) {
       if (!responseData || !responseData.message) {
         displayMessage(
           "assistant",
-          "⚠Erreur de communication avec l'API locale (Ollama).",
+          "Communication error with the local API (Ollama).",
         );
         break;
       }
@@ -271,6 +326,9 @@ async function onSendMessage(text) {
       chatMessages.push(msg);
 
       if (msg.tool_calls && msg.tool_calls.length > 0) {
+        if (msg.content && msg.content.trim()) {
+          displayMessage("assistant", msg.content);
+        }
         await handleToolCalls(msg.tool_calls);
       } else {
         isDone = true;
@@ -281,17 +339,11 @@ async function onSendMessage(text) {
     }
 
     if (currentLoop >= maxLoops && !isDone) {
-      displayMessage(
-        "assistant",
-        "Trop d'appels récursifs, j'ai dû m'arrêter.",
-      );
+      displayMessage("assistant", "Too many recursive calls, I had to stop.");
     }
   } catch (err) {
     console.error("Garmin Peak - Agent loop error:", err);
-    displayMessage(
-      "assistant",
-      "Une erreur critique s'est produite lors du traitement.",
-    );
+    displayMessage("assistant", "A critical error occurred during processing.");
   } finally {
     updateLoadingState(false);
   }
@@ -308,11 +360,11 @@ function addMyDiv() {
   chatContainer.innerHTML = `
     <div class="llm-chat-header">Garmin Peak</div>
     <div class="llm-chat-messages" id="llm-messages">
-      <div class="llm-message assistant">Bonjour ! Je suis ton coach IA. Comment puis-je t'aider avec tes données de santé ou tes activités aujourd'hui ?</div>
+      <div class="llm-message assistant">Hello! I'm your AI coach. How can I help you with your health data or activities today?</div>
     </div>
     <div class="llm-chat-input-area">
-      <input type="text" id="llm-input" placeholder="Ex: 'Résumé de ma journée' ou 'Dernières activités'..." />
-      <button id="llm-send">Envoyer</button>
+      <input type="text" id="llm-input" placeholder="Ex: 'Summary of my day' or 'Latest activities'..." />
+      <button id="llm-send">Send</button>
     </div>
   `;
 
