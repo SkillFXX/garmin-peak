@@ -13,4 +13,4 @@ Garmin Peak currently uses a local AI model called Ollama; through “Tool Calli
 
 ## Preview
 
-![Garmin Peak Chat Preview.](.github/previews/chat.png)
+![Garmin Peak Chat Preview.](previews/chat.png)
