@@ -1,6 +1,6 @@
 const CONFIG = {
   OLLAMA_BASE_URL: "http://localhost:11434",
-  OLLAMA_MODEL: "qwen3.5:4b",
+  OLLAMA_MODEL: "gemma4:latest",
   GARMIN_BASE: "https://connect.garmin.com/gc-api",
 };
 
@@ -8,81 +8,35 @@ let apiEndpoints = null;
 let chatMessages = [
   {
     role: "system",
-    content: `You are a professional Garmin performance coach and data analyst.
-
-Your role is to help the user understand, analyze, and improve their sports performance using Garmin activity data.
-
-You operate in a strict tool-first workflow.
-
------------------------
-CONTEXT
------------------------
-Current date: ${new Date().toISOString().split("T")[0]}
-
-All tool outputs use:
-- Time → seconds
-- Distance → meters
-- Speed → meters/second
-
-You MUST convert all values into human-friendly units:
-- Time → hh:mm:ss
-- Distance → kilometers (km)
-- Speed → km/h
-- Pace (if relevant) → min/km
-
-Round values appropriately for readability.
-
------------------------
-CORE BEHAVIOR
------------------------
-
-1. TOOL-FIRST EXECUTION
-- If the user request requires data, you MUST call the appropriate tool immediately.
-- Do NOT ask follow-up questions.
-- Do NOT explain what you are about to do.
-- Do NOT produce any natural language before the tool call.
-
-2. TOOL USAGE
-- Always select the MOST relevant tool.
-- Provide complete and accurate arguments.
-- Never guess missing required parameters → infer intelligently from context if possible.
-
-3. POST-TOOL RESPONSE
-- Parse the tool response fully before answering.
-- NEVER describe the raw JSON structure.
-- Extract only meaningful insights.
-
-4. ANALYSIS EXPECTATIONS
-You must go beyond simple reporting. Always:
-- Highlight key metrics (duration, distance, pace, HR, etc.)
-- Identify patterns or anomalies
-- Provide actionable insights
-- Suggest improvements when relevant
-
-5. COMMUNICATION STYLE
-- Be concise, clear, and coach-like
-- Default to short answers unless the user explicitly asks for more detail
-- No emojis
-- No markdown formatting
-- No unnecessary explanations or filler
-- Be precise and data-driven
-
-6. EDGE CASES
-- If no relevant data is found → clearly say so and suggest next steps
-- If data is incomplete → explain limitations briefly and proceed with best effort
-
------------------------
-STRICT RULES
------------------------
-
-- NEVER hallucinate data
-- NEVER invent tool outputs
-- NEVER explain JSON schemas
-- NEVER skip unit conversion
-- NEVER answer without calling a tool if data is required
-`,
+    content: `You are a professional Garmin performance coach and data analyst. Your role is to help the user understand, analyze, and improve their sports performance using Garmin activity data. You operate in a strict tool-first workflow. Current date: ${new Date().toISOString().split("T")[0]} All tool outputs use: - Time → seconds - Distance → meters - Speed → meters/second You MUST convert all values into human-friendly units: - Time → hh:mm:ss - Distance → kilometers (km) - Speed → km/h - Pace (if relevant) → min/km Round values appropriately for readability. Don't just repeat the data you're analyzing; summarize it and analyze it. Respond mainly with short, concise sentences unless asked otherwise.`,
   },
 ];
+
+function formatAssistantMarkdown(rawText) {
+  let escaped = rawText
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+  escaped = escaped.replace(/^---$/gm, "<hr />");
+  escaped = escaped
+    .replace(/^######\s+(.*)$/gm, "<h6>$1</h6>")
+    .replace(/^#####\s+(.*)$/gm, "<h5>$1</h5>")
+    .replace(/^####\s+(.*)$/gm, "<h4>$1</h4>")
+    .replace(/^###\s+(.*)$/gm, "<h3>$1</h3>")
+    .replace(/^##\s+(.*)$/gm, "<h2>$1</h2>")
+    .replace(/^#\s+(.*)$/gm, "<h1>$1</h1>");
+  escaped = escaped.replace(/^>\s?(.*)$/gm, "<blockquote>$1</blockquote>");
+  escaped = escaped.replace(/`([^`]+)`/g, "<code>$1</code>");
+  escaped = escaped
+    .replace(/\*\*(.+?)\*\*/g, '<span class="llm-bold">$1</span>')
+    .replace(/__(.+?)__/g, '<span class="llm-bold">$1</span>')
+    .replace(/==(.+?)==/g, '<span class="llm-underline">$1</span>')
+    .replace(/~~(.+?)~~/g, '<span class="llm-strikethrough">$1</span>');
+  escaped = escaped.replace(/\n/g, "<br>");
+  return escaped;
+}
 
 (async () => {
   try {
@@ -182,11 +136,16 @@ function displayMessage(role, text) {
       ? text.replace(/<think>[\s\S]*?<\/think>\s*/gi, "").trim()
       : text;
 
-  if (cleanText) {
+  if (!cleanText) return;
+
+  if (role === "assistant") {
+    msgDiv.innerHTML = formatAssistantMarkdown(cleanText);
+  } else {
     msgDiv.textContent = cleanText;
-    messagesContainer.appendChild(msgDiv);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
+
+  messagesContainer.appendChild(msgDiv);
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
 function updateLoadingState(isLoading) {
@@ -277,10 +236,30 @@ async function handleToolCalls(toolCalls) {
     }
 
     displayMessage("assistant", `Data Recovery : ${funcName}...`);
+
     const targetUrl = urlObj.toString();
     console.log(`Garmin Peak - Fetching: ${targetUrl}`);
 
     const data = await garminFetch(targetUrl);
+
+    console.log(endpointConfig.ignore);
+
+    const ignore = endpointConfig.ignore || [];
+
+    const stack = [data];
+
+    while (stack.length) {
+      const obj = stack.pop();
+      if (!obj || typeof obj !== "object") continue;
+
+      for (const key in obj) {
+        if (ignore.includes(key)) {
+          delete obj[key];
+        } else {
+          stack.push(obj[key]);
+        }
+      }
+    }
 
     const toolResponse = data
       ? JSON.stringify(data)
@@ -294,6 +273,7 @@ async function handleToolCalls(toolCalls) {
     });
 
     console.log(`Garmin Peak - Tool ${funcName} processed.`);
+    console.log(`Garmin Peak - Tool response:`, toolResponse);
   }
 }
 
@@ -427,6 +407,36 @@ style.textContent = `
     line-height: 1.5;
     white-space: pre-wrap;
   }
+
+  .llm-message.assistant code,
+  .llm-message.assistant pre {
+    font-family: "Courier New", Courier, monospace;
+  }
+  .llm-message.assistant h1,
+  .llm-message.assistant h2,
+  .llm-message.assistant h3,
+  .llm-message.assistant h4,
+  .llm-message.assistant h5,
+  .llm-message.assistant h6,
+  .llm-message.assistant blockquote,
+  .llm-message.assistant hr 
+  .llm-message.assistant p,
+  .llm-message.assistant ul,
+  .llm-message.assistant ol,
+  .llm-message.assistant code,
+  .llm-message.assistant pre {
+    margin: 0 0 0.5em 0;
+  }
+  .llm-bold {
+    font-weight: 700;
+  }
+  .llm-underline {
+    text-decoration: underline;
+  }
+  .llm-strikethrough {
+    text-decoration: line-through;
+  }
+
   .llm-message.user {
     background-color: #007bc1;
     color: #ffffff;

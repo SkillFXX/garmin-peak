@@ -14,6 +14,19 @@ export const api = {
     method: "GET",
     url: "https://connect.garmin.com/gc-api/sleep-service/sleep/dailySleepData",
     description: "Returns weather details of a specific activity.",
+    ignore: [
+      "sleepMovement",
+      "sleepLevels",
+      "sleepRestlessMoments",
+      "wellnessSpO2SleepSummaryDTO",
+      "wellnessEpochSPO2DataDTOList",
+      "wellnessEpochRespirationDataDTOList",
+      "wellnessEpochRespirationAveragesList",
+      "sleepHeartRate",
+      "sleepStress",
+      "sleepBodyBattery",
+      "hrvData",
+    ],
     query: {
       date: {
         type: "string (YYYY-MM-DD)",
@@ -69,54 +82,80 @@ export const api = {
       },
     },
   },
-  activities: {
+  activites: {
     method: "GET",
-    url: "https://connect.garmin.com/gc-api/activitylist-service/activities/search/activities",
-    description: "Returns a list of all activities.",
+    url: "https://connect.garmin.com/gc-api/fitnessstats-service/activity/all",
+    description: "Returns a list of activities between two dates.",
     query: {
-      limit: {
-        type: "number",
+      startDate: {
+        type: "string (YYYY-MM-DD)",
         required: true,
-        description: "Limit of listed activities",
+        description: "Start date of the listed activities",
       },
-      start: {
-        type: "number",
+      endDate: {
+        type: "string (YYYY-MM-DD)",
         required: true,
-        description: "Start of the listed activities",
+        description: "End date of the listed activities",
       },
-      activityType: {
+      metric: {
         type: "string",
         required: false,
-        description: "Filter by activity type (e.g., 'running')",
-      },
-      search: {
-        type: "string",
-        required: false,
-        description: "Search term to filter activities by name",
+        description:
+          "The metrics to include for each activity in the activity list (only one) (e.g., avgSpeed, distance, duration, activityType...)",
       },
     },
-    activity: {
-      method: "GET",
-      url: "https://connect.garmin.com/gc-api/activity-service/activity/{activityId}",
-      description: "Returns detailed information about a specific activity.",
+  },
+  // Removed because it displays far too much information about activities
+  // activities_old: {
+  //   method: "GET",
+  //   url: "https://connect.garmin.com/gc-api/activitylist-service/activities/search/activities",
+  //   description: "Returns a list of all activities.",
+  //   ignore: ["userRoles", "ownerProfileImageUrlSmall", "ownerProfileImageUrlMedium", "ownerProfileImageUrlLarge", "beginTimestamp"],
+  //   query: {
+  //     limit: {
+  //       type: "number",
+  //       required: true,
+  //       description: "Limit of listed activities",
+  //     },
+  //     start: {
+  //       type: "number",
+  //       required: true,
+  //       description: "Start of the listed activities",
+  //     },
+  //     activityType: {
+  //       type: "string",
+  //       required: false,
+  //       description: "Filter by activity type (e.g., 'running')",
+  //     },
+  //     search: {
+  //       type: "string",
+  //       required: false,
+  //       description: "Search term to filter activities by name",
+  //     },
+  //   },
+  activity: {
+    method: "GET",
+    url: "https://connect.garmin.com/gc-api/activity-service/activity/{activityId}",
+    description: "Returns detailed information about a specific activity.",
+    ignore: ["splitSummaries"],
 
-      params: {
-        activityId: {
-          type: "number",
-          description: "Activity ID",
-        },
+    params: {
+      activityId: {
+        type: "number",
+        description: "Activity ID",
       },
     },
-    splits: {
-      method: "GET",
-      url: "https://connect.garmin.com/gc-api/activity/{activityId}/splits",
-      description: "Returns lap/split data for an activity.",
+  },
+  splits: {
+    method: "GET",
+    url: "https://connect.garmin.com/gc-api/activity-service/activity/{activityId}/splits",
+    description: "Returns lap/split data for an activity.",
+    ignore: ["startLatitude","startLongitude", "eventDTOs"],
 
-      params: {
-        activityId: {
-          type: "number",
-          description: "Activity ID",
-        },
+    params: {
+      activityId: {
+        type: "number",
+        description: "Activity ID",
       },
     },
   },
