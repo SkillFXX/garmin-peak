@@ -1,4 +1,6 @@
 export const CONFIG = {
+  // The AI model used must be compatible with the tools
+
   OLLAMA_BASE_URL: "http://localhost:11434",
   OLLAMA_MODEL: "gemma4:latest",
 
